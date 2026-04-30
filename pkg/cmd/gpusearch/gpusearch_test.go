@@ -238,6 +238,18 @@ func TestFilterInstancesCombined(t *testing.T) {
 	assert.Len(t, filtered, 3, "Should have 3 instances with >= 24GB VRAM and capability >= 8.5")
 }
 
+func TestFilterInstancesByMaxPrice(t *testing.T) {
+	response := createTestInstanceTypes()
+	instances := ProcessInstances(response.Items)
+
+	filtered := FilterInstancesWithOptions(instances, &FilterOptions{MaxPrice: 1.006}, true)
+
+	assert.Len(t, filtered, 3, "Should include instances priced <= max price")
+	assert.Equal(t, "g5.xlarge", filtered[0].Type, "Boundary price should be included")
+	assert.Equal(t, "g4dn.xlarge", filtered[1].Type)
+	assert.Equal(t, "g6.xlarge", filtered[2].Type)
+}
+
 func TestSortInstancesByPrice(t *testing.T) {
 	response := createTestInstanceTypes()
 	instances := ProcessInstances(response.Items)

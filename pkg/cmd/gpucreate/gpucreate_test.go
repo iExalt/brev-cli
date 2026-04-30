@@ -611,6 +611,19 @@ func TestGetFilteredInstanceTypesWithGPUName(t *testing.T) {
 	assert.Equal(t, "g5.xlarge", specs[0].Type)
 }
 
+func TestGetFilteredInstanceTypesWithMaxPrice(t *testing.T) {
+	mock := NewMockGPUCreateStore()
+
+	specs, err := getFilteredInstanceTypes(mock, &searchFilterFlags{maxPrice: 1.006})
+	assert.NoError(t, err)
+	assert.Len(t, specs, 1)
+	assert.Equal(t, "g5.xlarge", specs[0].Type)
+
+	specs, err = getFilteredInstanceTypes(mock, &searchFilterFlags{maxPrice: 1.0})
+	assert.NoError(t, err)
+	assert.Len(t, specs, 0)
+}
+
 func TestGetFilteredInstanceTypesNoMatch(t *testing.T) {
 	mock := NewMockGPUCreateStore()
 

@@ -130,6 +130,7 @@ Features column shows instance capabilities:
 
   # Sort and combine filters
   brev search gpu --gpu-name H100 --sort price
+  brev search gpu --max-price 2.50 --sort price
   brev search gpu --stoppable --min-total-vram 40 --sort price
 `
 
@@ -148,6 +149,9 @@ Features column shows instance capabilities:
 
   # Sort by price
   brev search cpu --sort price
+
+  # Filter by maximum hourly price
+  brev search cpu --max-price 0.50
 `
 )
 
@@ -158,6 +162,7 @@ type sharedFlags struct {
 	minVCPU     int
 	minRAM      float64
 	minDisk     float64
+	maxPrice    float64
 	maxBootTime int
 	stoppable   bool
 	rebootable  bool
@@ -174,6 +179,7 @@ func addSharedFlags(cmd *cobra.Command, f *sharedFlags) {
 	cmd.Flags().IntVar(&f.minVCPU, "min-vcpu", 0, "Minimum number of vCPUs")
 	cmd.Flags().Float64Var(&f.minRAM, "min-ram", 0, "Minimum RAM in GB")
 	cmd.Flags().Float64Var(&f.minDisk, "min-disk", 0, "Minimum disk size in GB")
+	cmd.Flags().Float64Var(&f.maxPrice, "max-price", 0, "Maximum price per hour in USD")
 	cmd.Flags().IntVar(&f.maxBootTime, "max-boot-time", 0, "Maximum boot time in minutes")
 	cmd.Flags().BoolVar(&f.stoppable, "stoppable", false, "Only show instances that can be stopped and restarted")
 	cmd.Flags().BoolVar(&f.rebootable, "rebootable", false, "Only show instances that can be rebooted")
@@ -203,7 +209,7 @@ func NewCmdGPUSearch(t *terminal.Terminal, store GPUSearchStore) *cobra.Command 
 		Example:               gpuExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default behavior: GPU search
-			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
+			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
 		},
 	}
 
@@ -237,7 +243,7 @@ func newCmdGPUSubcommand(t *terminal.Terminal, store GPUSearchStore) *cobra.Comm
 		Short:                 "Search GPU instance types",
 		Example:               gpuExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
+			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
 		},
 	}
 
@@ -261,7 +267,7 @@ func newCmdCPUSubcommand(t *terminal.Terminal, store GPUSearchStore) *cobra.Comm
 		Short:                 "Search CPU-only instance types",
 		Example:               cpuExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunCPUSearch(t, store, shared.provider, shared.arch, shared.minRAM, shared.minDisk, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput)
+			return RunCPUSearch(t, store, shared.provider, shared.arch, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput)
 		},
 	}
 
@@ -303,7 +309,7 @@ func IsStdoutPiped() bool {
 }
 
 // RunGPUSearch executes the GPU search with filters and sorting
-func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider, arch string, minVRAM, minTotalVRAM, minCapability, minRAM, minDisk float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput, wide bool) error {
+func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider, arch string, minVRAM, minTotalVRAM, minCapability, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput, wide bool) error {
 	if err := validateSortOption(sortBy); err != nil {
 		return err
 	}
@@ -321,8 +327,22 @@ func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider,
 
 	instances := ProcessInstances(response.Items)
 
-	// Filter to GPU-only instances
-	filtered := FilterInstances(instances, gpuName, provider, arch, minVRAM, minTotalVRAM, minCapability, minRAM, minDisk, minVCPU, maxBootTime, stoppable, rebootable, flexPorts, false)
+	filtered := FilterInstancesWithOptions(instances, &FilterOptions{
+		GPUName:       gpuName,
+		Provider:      provider,
+		Arch:          arch,
+		MinVRAM:       minVRAM,
+		MinTotalVRAM:  minTotalVRAM,
+		MinCapability: minCapability,
+		MinRAM:        minRAM,
+		MinDisk:       minDisk,
+		MaxPrice:      maxPrice,
+		MinVCPU:       minVCPU,
+		MaxBootTime:   maxBootTime,
+		Stoppable:     stoppable,
+		Rebootable:    rebootable,
+		FlexPorts:     flexPorts,
+	}, false)
 
 	if len(filtered) == 0 {
 		return displayEmptyResults(t, "No GPU instances match the specified filters", jsonOutput, piped)
@@ -334,7 +354,7 @@ func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider,
 }
 
 // RunCPUSearch executes the CPU search with filters and sorting
-func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, arch string, minRAM, minDisk float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput bool) error {
+func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, arch string, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput bool) error {
 	if err := validateSortOption(sortBy); err != nil {
 		return err
 	}
@@ -352,8 +372,18 @@ func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, arch str
 
 	instances := ProcessInstances(response.Items)
 
-	// Filter to CPU-only instances
-	filtered := FilterCPUInstances(instances, provider, arch, minRAM, minDisk, minVCPU, maxBootTime, stoppable, rebootable, flexPorts)
+	filtered := FilterCPUInstancesWithOptions(instances, &FilterOptions{
+		Provider:    provider,
+		Arch:        arch,
+		MinRAM:      minRAM,
+		MinDisk:     minDisk,
+		MaxPrice:    maxPrice,
+		MinVCPU:     minVCPU,
+		MaxBootTime: maxBootTime,
+		Stoppable:   stoppable,
+		Rebootable:  rebootable,
+		FlexPorts:   flexPorts,
+	})
 
 	if len(filtered) == 0 {
 		return displayEmptyResults(t, "No CPU instances match the specified filters", jsonOutput, piped)
@@ -802,6 +832,7 @@ type FilterOptions struct {
 	MinCapability float64
 	MinRAM        float64
 	MinDisk       float64
+	MaxPrice      float64
 	MinVCPU       int
 	MaxBootTime   int // in minutes
 	Stoppable     bool
@@ -850,6 +881,9 @@ func (f *FilterOptions) matchesNumericFilters(inst GPUInstanceInfo) bool {
 	if f.MinDisk > 0 && inst.DiskMax < f.MinDisk {
 		return false
 	}
+	if f.MaxPrice > 0 && inst.PricePerHour > f.MaxPrice {
+		return false
+	}
 	// Exclude instances with unknown boot time (0) when filter is specified
 	if f.MaxBootTime > 0 && (inst.BootTime == 0 || inst.BootTime > f.MaxBootTime*60) {
 		return false
@@ -896,6 +930,11 @@ func FilterInstances(instances []GPUInstanceInfo, gpuName, provider, arch string
 		FlexPorts:     flexPorts,
 	}
 
+	return FilterInstancesWithOptions(instances, opts, gpuOnly)
+}
+
+// FilterInstancesWithOptions applies all filters to the instance list. When gpuOnly is true, CPU-only instances are excluded.
+func FilterInstancesWithOptions(instances []GPUInstanceInfo, opts *FilterOptions, gpuOnly bool) []GPUInstanceInfo {
 	var filtered []GPUInstanceInfo
 	for _, inst := range instances {
 		if gpuOnly && inst.Manufacturer == "cpu" {
@@ -910,6 +949,21 @@ func FilterInstances(instances []GPUInstanceInfo, gpuName, provider, arch string
 
 // FilterCPUInstances filters to CPU-only instances using shared filter logic
 func FilterCPUInstances(instances []GPUInstanceInfo, provider, arch string, minRAM, minDisk float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool) []GPUInstanceInfo {
+	return FilterCPUInstancesWithOptions(instances, &FilterOptions{
+		Provider:    provider,
+		Arch:        arch,
+		MinRAM:      minRAM,
+		MinDisk:     minDisk,
+		MinVCPU:     minVCPU,
+		MaxBootTime: maxBootTime,
+		Stoppable:   stoppable,
+		Rebootable:  rebootable,
+		FlexPorts:   flexPorts,
+	})
+}
+
+// FilterCPUInstancesWithOptions filters to CPU-only instances using shared filter logic.
+func FilterCPUInstancesWithOptions(instances []GPUInstanceInfo, opts *FilterOptions) []GPUInstanceInfo {
 	// Filter out GPU instances first, then apply shared filters
 	var cpuOnly []GPUInstanceInfo
 	for _, inst := range instances {
@@ -917,7 +971,7 @@ func FilterCPUInstances(instances []GPUInstanceInfo, provider, arch string, minR
 			cpuOnly = append(cpuOnly, inst)
 		}
 	}
-	return FilterInstances(cpuOnly, "", provider, arch, 0, 0, 0, minRAM, minDisk, minVCPU, maxBootTime, stoppable, rebootable, flexPorts, false)
+	return FilterInstancesWithOptions(cpuOnly, opts, false)
 }
 
 // SortInstances sorts the instance list by the specified column

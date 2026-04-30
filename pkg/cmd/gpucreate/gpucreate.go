@@ -95,6 +95,7 @@ instance types by their maximum supported disk size.`
 
   # Use search filters directly and attach a startup script
   brev create my-instance -g a100 --startup-script @setup.sh
+  brev create my-instance --gpu-name A100 --max-price 2.50
 
   # Create with a specific disk size on flexible-disk instance types
   brev create my-instance --type g5.xlarge --disk-size 1000
@@ -139,6 +140,7 @@ type searchFilterFlags struct {
 	minTotalVRAM  float64
 	minCapability float64
 	minDisk       float64
+	maxPrice      float64
 	maxBootTime   int
 	stoppable     bool
 	rebootable    bool
@@ -150,7 +152,7 @@ type searchFilterFlags struct {
 // hasUserFilters returns true if the user specified any search filter flags
 func (f *searchFilterFlags) hasUserFilters() bool {
 	return f.gpuName != "" || f.provider != "" || f.minVRAM > 0 || f.minTotalVRAM > 0 ||
-		f.minCapability > 0 || f.minDisk > 0 || f.maxBootTime > 0 ||
+		f.minCapability > 0 || f.minDisk > 0 || f.maxPrice > 0 || f.maxBootTime > 0 ||
 		f.stoppable || f.rebootable || f.flexPorts
 }
 
@@ -304,6 +306,7 @@ func registerCreateFlags(cmd *cobra.Command, name, instanceTypes *string, count,
 	cmd.Flags().Float64Var(&filters.minTotalVRAM, "min-total-vram", 0, "Minimum total VRAM in GB")
 	cmd.Flags().Float64Var(&filters.minCapability, "min-capability", 0, "Minimum GPU compute capability (e.g., 8.0)")
 	cmd.Flags().Float64Var(&filters.minDisk, "min-disk", 0, "Minimum disk size in GB")
+	cmd.Flags().Float64Var(&filters.maxPrice, "max-price", 0, "Maximum price per hour in USD")
 	cmd.Flags().IntVar(&filters.maxBootTime, "max-boot-time", 0, "Maximum boot time in minutes")
 	cmd.Flags().BoolVar(&filters.stoppable, "stoppable", false, "Only use instances that can be stopped/restarted")
 	cmd.Flags().BoolVar(&filters.rebootable, "rebootable", false, "Only use instances that can be rebooted")
@@ -513,8 +516,19 @@ func searchInstances(s GPUCreateStore, filters *searchFilterFlags) ([]gpusearch.
 	}
 
 	instances := gpusearch.ProcessInstances(response.Items)
-	filtered := gpusearch.FilterInstances(instances, filters.gpuName, filters.provider, "", filters.minVRAM,
-		minTotalVRAM, minCapability, 0, minDisk, 0, maxBootTime, filters.stoppable, filters.rebootable, filters.flexPorts, true)
+	filtered := gpusearch.FilterInstancesWithOptions(instances, &gpusearch.FilterOptions{
+		GPUName:       filters.gpuName,
+		Provider:      filters.provider,
+		MinVRAM:       filters.minVRAM,
+		MinTotalVRAM:  minTotalVRAM,
+		MinCapability: minCapability,
+		MinDisk:       minDisk,
+		MaxPrice:      filters.maxPrice,
+		MaxBootTime:   maxBootTime,
+		Stoppable:     filters.stoppable,
+		Rebootable:    filters.rebootable,
+		FlexPorts:     filters.flexPorts,
+	}, true)
 	gpusearch.SortInstances(filtered, sortBy, filters.descending)
 
 	return filtered, minDisk, nil
