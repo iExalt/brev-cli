@@ -81,7 +81,12 @@ You can attach a startup script that runs when the instance boots using the
 --startup-script flag. The script can be provided as:
   - An inline string: --startup-script 'pip install torch'
   - A file path (prefix with @): --startup-script @setup.sh
-  - An absolute file path: --startup-script @/path/to/setup.sh`
+  - An absolute file path: --startup-script @/path/to/setup.sh
+
+Disk Sizing:
+Use --disk-size to request a specific disk size in GB for instance types with
+flexible disks. This differs from --min-disk, which only filters candidate
+instance types by their maximum supported disk size.`
 
 	example = `
   # Create an instance using smart defaults (sorted by price)
@@ -104,6 +109,8 @@ You can attach a startup script that runs when the instance boots using the
 
   # Deploy a launchable with setup values
   brev create --launchable env-abc --param MODEL=llama --param PORT=8080
+  # Create with a specific disk size on flexible-disk instance types
+  brev create my-instance --type g5.xlarge --disk-size 1000
 `
 )
 
@@ -178,6 +185,7 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 	var composeFile string
 	var launchable string
 	var launchableParams []string
+	var diskSize float64
 	var filters searchFilterFlags
 
 	cmd := &cobra.Command{
@@ -233,6 +241,13 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 			if err != nil {
 				return err
 			}
+			if cmd.Flags().Changed("disk-size") && diskSize <= 0 {
+				return breverrors.NewValidationError("--disk-size must be greater than 0")
+			}
+
+			if diskSize > filters.minDisk {
+				filters.minDisk = diskSize
+			}
 
 			types, err := parseInstanceTypes(instanceTypes, readStdin, os.Stdin)
 			if err != nil {
@@ -260,12 +275,14 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 				LaunchableID:      launchableID,
 				LaunchableInfo:    launchableInfo,
 				ParameterBindings: parameterBindings,
+				DiskSizeGB:        diskSize,
 			}
 
 			opts.InstanceTypes, err = resolveInstanceTypes(cmd, gpuCreateStore, opts, types, &filters)
 			if err != nil {
 				return err
 			}
+			opts.InstanceTypes = applyDiskSizeOverride(opts.InstanceTypes, diskSize)
 
 			if dryRun {
 				return runDryRun(t, gpuCreateStore, opts.InstanceTypes, &filters)
@@ -275,7 +292,7 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 		},
 	}
 
-	registerCreateFlags(cmd, &name, &instanceTypes, &readStdin, &count, &parallel, &detached, &timeout, &startupScript, &dryRun, &mode, &jupyter, &containerImage, &composeFile, &launchable, &launchableParams, &filters)
+	registerCreateFlags(cmd, &name, &instanceTypes, &readStdin, &count, &parallel, &detached, &timeout, &startupScript, &dryRun, &mode, &jupyter, &containerImage, &composeFile, &launchable, &launchableParams, &diskSize, &filters)
 
 	return cmd
 }
@@ -292,7 +309,7 @@ func validateArgs(name string, count int) error {
 }
 
 // registerCreateFlags registers all flags for the create command
-func registerCreateFlags(cmd *cobra.Command, name, instanceTypes *string, readStdin *bool, count, parallel *int, detached *bool, timeout *int, startupScript *string, dryRun *bool, mode *string, jupyter *bool, containerImage, composeFile, launchable *string, launchableParams *[]string, filters *searchFilterFlags) {
+func registerCreateFlags(cmd *cobra.Command, name, instanceTypes *string, readStdin *bool, count, parallel *int, detached *bool, timeout *int, startupScript *string, dryRun *bool, mode *string, jupyter *bool, containerImage, composeFile, launchable *string, launchableParams *[]string, diskSize *float64, filters *searchFilterFlags) {
 	cmd.Flags().StringVarP(name, "name", "n", "", "Base name for the instances (or pass as first argument)")
 	cmd.Flags().StringVarP(instanceTypes, "type", "t", "", "Comma-separated list of instance types to try")
 	cmd.Flags().BoolVar(readStdin, "stdin", false, "Read instance types from stdin (opt-in; e.g. brev search | brev create <name> --stdin)")
@@ -302,6 +319,7 @@ func registerCreateFlags(cmd *cobra.Command, name, instanceTypes *string, readSt
 	cmd.Flags().IntVar(timeout, "timeout", 300, "Timeout in seconds for each instance to become ready")
 	cmd.Flags().StringVarP(startupScript, "startup-script", "s", "", "Startup script to run on instance (string or @filepath)")
 	cmd.Flags().BoolVar(dryRun, "dry-run", false, "Show matching instance types without creating anything")
+	cmd.Flags().Float64Var(diskSize, "disk-size", 0, "Requested disk size in GB for flexible-disk instance types")
 
 	// Build mode flags
 	cmd.Flags().StringVarP(mode, "mode", "m", "vm", "Build mode: vm (default), k8s, container, compose")
@@ -348,6 +366,7 @@ type GPUCreateOptions struct {
 	LaunchableID      string
 	LaunchableInfo    *store.LaunchableResponse // populated when LaunchableID is set
 	ParameterBindings []store.ParameterBinding
+	DiskSizeGB        float64 // explicit --disk-size override in GB
 }
 
 // parseLaunchableID extracts a launchable ID from either a raw ID (env-XXX) or
@@ -730,6 +749,16 @@ func getFilteredInstanceTypes(s GPUCreateStore, filters *searchFilterFlags) ([]I
 	}
 
 	return specs, nil
+}
+
+func applyDiskSizeOverride(specs []InstanceSpec, diskSize float64) []InstanceSpec {
+	if diskSize <= 0 {
+		return specs
+	}
+	for i := range specs {
+		specs[i].DiskGB = diskSize
+	}
+	return specs
 }
 
 // runDryRun shows the instance types that would be used without creating anything
@@ -1297,6 +1326,10 @@ func (c *createContext) createWorkspace(name string, spec InstanceSpec) (*entity
 		if err != nil {
 			return nil, breverrors.WrapAndTrace(err)
 		}
+	}
+
+	if c.opts.DiskSizeGB > 0 {
+		cwOptions.DiskStorage = fmt.Sprintf("%.0fGi", c.opts.DiskSizeGB)
 	}
 
 	if cwOptions.CloudCredID == "" {

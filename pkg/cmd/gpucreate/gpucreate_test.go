@@ -48,6 +48,8 @@ type MockGPUCreateStore struct {
 	CreatedWorkspaces         []*entity.Workspace
 	DeletedWorkspaceIDs       []string
 	FetchedLifeCycleScriptIDs []string
+	InstanceTypes             *gpusearch.InstanceTypesResponse
+	AllInstanceTypes          *gpusearch.AllInstanceTypesResponse
 }
 
 func NewMockGPUCreateStore() *MockGPUCreateStore {
@@ -63,6 +65,7 @@ func NewMockGPUCreateStore() *MockGPUCreateStore {
 		CreateErrorTypes:    make(map[string]error),
 		EnvironmentStatuses: make(map[string]devplanev1.EnvironmentStatus),
 		CreatedWorkspaces:   []*entity.Workspace{},
+		CreatedOptions:      []*store.CreateWorkspacesOptions{},
 		DeletedWorkspaceIDs: []string{},
 	}
 }
@@ -119,6 +122,9 @@ func (m *MockGPUCreateStore) GetWorkspaceByNameOrID(orgID string, nameOrID strin
 }
 
 func (m *MockGPUCreateStore) GetAllInstanceTypesWithCloudCreds(orgID string) (*gpusearch.AllInstanceTypesResponse, error) {
+	if m.AllInstanceTypes != nil {
+		return m.AllInstanceTypes, nil
+	}
 	return &gpusearch.AllInstanceTypesResponse{
 		AllInstanceTypes: []gpusearch.InstanceType{
 			{Type: "test.fail.quota", CloudCredID: "testkube-brev-test"},
@@ -146,6 +152,10 @@ func (m *MockGPUCreateStore) RedeemCouponCode(organizationID string, code string
 }
 
 func (m *MockGPUCreateStore) GetInstanceTypes(_ bool) (*gpusearch.InstanceTypesResponse, error) {
+	if m.InstanceTypes != nil {
+		return m.InstanceTypes, nil
+	}
+
 	// Return a default set of instance types for testing
 	return &gpusearch.InstanceTypesResponse{
 		Items: []gpusearch.InstanceType{
@@ -871,6 +881,71 @@ func TestCreateDryRunWithExplicitTypesDoesNotProvision(t *testing.T) {
 	err := cmd.Execute()
 	assert.NoError(t, err)
 	assert.Empty(t, mock.CreatedWorkspaces)
+}
+
+func withCreatableType(mock *MockGPUCreateStore, instanceType string) *MockGPUCreateStore {
+	mock.AllInstanceTypes = &gpusearch.AllInstanceTypesResponse{
+		AllInstanceTypes: []gpusearch.InstanceType{{Type: instanceType, CloudCredID: "cc-test"}},
+	}
+	return mock
+}
+
+func TestCreateWithDiskSizeAndExplicitType(t *testing.T) {
+	mock := withCreatableType(NewMockGPUCreateStore(), "g5.xlarge")
+	term := terminal.New()
+
+	cmd := NewCmdGPUCreate(term, mock)
+	cmd.SetArgs([]string{"disk-test", "--type", "g5.xlarge", "--disk-size", "1000", "--detached"})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Len(t, mock.CreatedOptions, 1)
+	assert.Equal(t, "g5.xlarge", mock.CreatedOptions[0].InstanceType)
+	assert.Equal(t, "1000Gi", mock.CreatedOptions[0].DiskStorage)
+}
+
+func TestCreateWithInvalidDiskSize(t *testing.T) {
+	mock := NewMockGPUCreateStore()
+	term := terminal.New()
+
+	cmd := NewCmdGPUCreate(term, mock)
+	cmd.SetArgs([]string{"disk-test", "--type", "g5.xlarge", "--disk-size", "0", "--detached"})
+
+	err := cmd.Execute()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "--disk-size must be greater than 0")
+	assert.Empty(t, mock.CreatedOptions)
+}
+
+func TestCreateWithDiskSizeAutoSelectsSupportedFlexibleDisk(t *testing.T) {
+	mock := withCreatableType(NewMockGPUCreateStore(), "g5.xlarge")
+	mock.InstanceTypes = &gpusearch.InstanceTypesResponse{
+		Items: []gpusearch.InstanceType{
+			{
+				Type: "g5.xlarge",
+				SupportedGPUs: []gpusearch.GPU{
+					{Count: 1, Name: "A10G", Manufacturer: "NVIDIA", Memory: "24GiB"},
+				},
+				SupportedStorage: []gpusearch.Storage{
+					{MinSize: "10GiB", MaxSize: "16TiB"},
+				},
+				Memory:              "16GiB",
+				VCPU:                4,
+				BasePrice:           gpusearch.BasePrice{Currency: "USD", Amount: "1.006"},
+				EstimatedDeployTime: "5m0s",
+			},
+		},
+	}
+	term := terminal.New()
+
+	cmd := NewCmdGPUCreate(term, mock)
+	cmd.SetArgs([]string{"disk-auto-test", "--disk-size", "1000", "--detached"})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Len(t, mock.CreatedOptions, 1)
+	assert.Equal(t, "g5.xlarge", mock.CreatedOptions[0].InstanceType)
+	assert.Equal(t, "1000Gi", mock.CreatedOptions[0].DiskStorage)
 }
 
 func TestGetFilteredInstanceTypesDefaults(t *testing.T) {
