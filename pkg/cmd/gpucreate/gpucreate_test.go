@@ -883,15 +883,18 @@ func TestCreateDryRunWithExplicitTypesDoesNotProvision(t *testing.T) {
 	assert.Empty(t, mock.CreatedWorkspaces)
 }
 
-func withCreatableType(mock *MockGPUCreateStore, instanceType string) *MockGPUCreateStore {
-	mock.AllInstanceTypes = &gpusearch.AllInstanceTypesResponse{
-		AllInstanceTypes: []gpusearch.InstanceType{{Type: instanceType, CloudCredID: "cc-test"}},
+// withCreatableTypes lists the types with a cloud credential, which createWorkspace requires.
+func withCreatableTypes(mock *MockGPUCreateStore, instanceTypes ...string) *MockGPUCreateStore {
+	all := &gpusearch.AllInstanceTypesResponse{}
+	for _, t := range instanceTypes {
+		all.AllInstanceTypes = append(all.AllInstanceTypes, gpusearch.InstanceType{Type: t, CloudCredID: "cc-test"})
 	}
+	mock.AllInstanceTypes = all
 	return mock
 }
 
 func TestCreateWithDiskSizeAndExplicitType(t *testing.T) {
-	mock := withCreatableType(NewMockGPUCreateStore(), "g5.xlarge")
+	mock := withCreatableTypes(NewMockGPUCreateStore(), "g5.xlarge")
 	term := terminal.New()
 
 	cmd := NewCmdGPUCreate(term, mock)
@@ -902,6 +905,20 @@ func TestCreateWithDiskSizeAndExplicitType(t *testing.T) {
 	assert.Len(t, mock.CreatedOptions, 1)
 	assert.Equal(t, "g5.xlarge", mock.CreatedOptions[0].InstanceType)
 	assert.Equal(t, "1000Gi", mock.CreatedOptions[0].DiskStorage)
+}
+
+func TestCreateWithRegionAndExplicitType(t *testing.T) {
+	mock := withCreatableTypes(NewMockGPUCreateStore(), "g5.xlarge")
+	term := terminal.New()
+
+	cmd := NewCmdGPUCreate(term, mock)
+	cmd.SetArgs([]string{"region-test", "--type", "g5.xlarge", "--region", "us-west1", "--detached"})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Len(t, mock.CreatedOptions, 1)
+	assert.Equal(t, "g5.xlarge", mock.CreatedOptions[0].InstanceType)
+	assert.Equal(t, "us-west1", mock.CreatedOptions[0].Location)
 }
 
 func TestCreateWithInvalidDiskSize(t *testing.T) {
@@ -918,7 +935,7 @@ func TestCreateWithInvalidDiskSize(t *testing.T) {
 }
 
 func TestCreateWithDiskSizeAutoSelectsSupportedFlexibleDisk(t *testing.T) {
-	mock := withCreatableType(NewMockGPUCreateStore(), "g5.xlarge")
+	mock := withCreatableTypes(NewMockGPUCreateStore(), "g5.xlarge")
 	mock.InstanceTypes = &gpusearch.InstanceTypesResponse{
 		Items: []gpusearch.InstanceType{
 			{
@@ -946,6 +963,52 @@ func TestCreateWithDiskSizeAutoSelectsSupportedFlexibleDisk(t *testing.T) {
 	assert.Len(t, mock.CreatedOptions, 1)
 	assert.Equal(t, "g5.xlarge", mock.CreatedOptions[0].InstanceType)
 	assert.Equal(t, "1000Gi", mock.CreatedOptions[0].DiskStorage)
+}
+
+func TestCreateWithRegionAutoSelectsMatchingLocation(t *testing.T) {
+	mock := withCreatableTypes(NewMockGPUCreateStore(), "g5.east-xlarge", "g5.west-xlarge")
+	mock.InstanceTypes = &gpusearch.InstanceTypesResponse{
+		Items: []gpusearch.InstanceType{
+			{
+				Type: "g5.east-xlarge",
+				SupportedGPUs: []gpusearch.GPU{
+					{Count: 1, Name: "A10G", Manufacturer: "NVIDIA", Memory: "24GiB"},
+				},
+				SupportedStorage: []gpusearch.Storage{
+					{Size: "500GiB"},
+				},
+				Memory:              "16GiB",
+				VCPU:                4,
+				BasePrice:           gpusearch.BasePrice{Currency: "USD", Amount: "0.500"},
+				EstimatedDeployTime: "5m0s",
+				AvailableLocations:  []string{"us-east1"},
+			},
+			{
+				Type: "g5.west-xlarge",
+				SupportedGPUs: []gpusearch.GPU{
+					{Count: 1, Name: "A10G", Manufacturer: "NVIDIA", Memory: "24GiB"},
+				},
+				SupportedStorage: []gpusearch.Storage{
+					{Size: "500GiB"},
+				},
+				Memory:              "16GiB",
+				VCPU:                4,
+				BasePrice:           gpusearch.BasePrice{Currency: "USD", Amount: "1.000"},
+				EstimatedDeployTime: "5m0s",
+				AvailableLocations:  []string{"us-west1"},
+			},
+		},
+	}
+	term := terminal.New()
+
+	cmd := NewCmdGPUCreate(term, mock)
+	cmd.SetArgs([]string{"region-auto-test", "--region", "us-west1", "--detached"})
+
+	err := cmd.Execute()
+	assert.NoError(t, err)
+	assert.Len(t, mock.CreatedOptions, 1)
+	assert.Equal(t, "g5.west-xlarge", mock.CreatedOptions[0].InstanceType)
+	assert.Equal(t, "us-west1", mock.CreatedOptions[0].Location)
 }
 
 func TestGetFilteredInstanceTypesDefaults(t *testing.T) {
