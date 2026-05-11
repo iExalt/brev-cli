@@ -36,13 +36,14 @@ until the desired number of instances are successfully created. Instance types
 can be specified directly, piped from 'brev search', or auto-selected using defaults.
 
 Search Filters:
-You can use the same filter flags as 'brev search' to control which GPU types
+You can use search-style filter flags to control which GPU types
 are considered. If no instance types are specified (no --type flag and no piped input),
 the command automatically searches for GPUs matching either your filters or defaults:
   - Minimum 20GB total VRAM (--min-total-vram)
   - Minimum 500GB disk (--min-disk)
   - Compute capability 8.0+ (--min-capability)
   - Boot time under 7 minutes (--max-boot-time, only when no filters set)
+  - Optional region/location (--region)
 Results are sorted by price (cheapest first) unless --sort is specified.
 
 Retry and Fallback Logic:
@@ -96,6 +97,7 @@ instance types by their maximum supported disk size.`
   # Use search filters directly and attach a startup script
   brev create my-instance -g a100 --startup-script @setup.sh
   brev create my-instance --gpu-name A100 --max-price 2.50
+  brev create my-instance --region us-west1
 
   # Create with a specific disk size on flexible-disk instance types
   brev create my-instance --type g5.xlarge --disk-size 1000
@@ -136,6 +138,7 @@ type CreateResult struct {
 type searchFilterFlags struct {
 	gpuName       string
 	provider      string
+	region        string
 	minVRAM       float64
 	minTotalVRAM  float64
 	minCapability float64
@@ -151,7 +154,7 @@ type searchFilterFlags struct {
 
 // hasUserFilters returns true if the user specified any search filter flags
 func (f *searchFilterFlags) hasUserFilters() bool {
-	return f.gpuName != "" || f.provider != "" || f.minVRAM > 0 || f.minTotalVRAM > 0 ||
+	return f.gpuName != "" || f.provider != "" || f.region != "" || f.minVRAM > 0 || f.minTotalVRAM > 0 ||
 		f.minCapability > 0 || f.minDisk > 0 || f.maxPrice > 0 || f.maxBootTime > 0 ||
 		f.stoppable || f.rebootable || f.flexPorts
 }
@@ -222,6 +225,7 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 			if diskSize > filters.minDisk {
 				filters.minDisk = diskSize
 			}
+			filters.region = strings.TrimSpace(filters.region)
 
 			types, err := parseInstanceTypes(instanceTypes)
 			if err != nil {
@@ -249,6 +253,7 @@ func NewCmdGPUCreate(t *terminal.Terminal, gpuCreateStore GPUCreateStore) *cobra
 				LaunchableID:   launchableID,
 				LaunchableInfo: launchableInfo,
 				DiskSizeGB:     diskSize,
+				Region:         filters.region,
 			}
 
 			opts.InstanceTypes, err = resolveInstanceTypes(cmd, gpuCreateStore, opts, types, &filters)
@@ -302,6 +307,7 @@ func registerCreateFlags(cmd *cobra.Command, name, instanceTypes *string, count,
 
 	cmd.Flags().StringVarP(&filters.gpuName, "gpu-name", "g", "", "Filter by GPU name (e.g., A100, H100)")
 	cmd.Flags().StringVar(&filters.provider, "provider", "", "Filter by provider/cloud (e.g., aws, gcp)")
+	cmd.Flags().StringVar(&filters.region, "region", "", "Create in a specific region/location (e.g., us-west1)")
 	cmd.Flags().Float64VarP(&filters.minVRAM, "min-vram", "v", 0, "Minimum VRAM per GPU in GB")
 	cmd.Flags().Float64Var(&filters.minTotalVRAM, "min-total-vram", 0, "Minimum total VRAM in GB")
 	cmd.Flags().Float64Var(&filters.minCapability, "min-capability", 0, "Minimum GPU compute capability (e.g., 8.0)")
@@ -338,6 +344,7 @@ type GPUCreateOptions struct {
 	LaunchableID   string
 	LaunchableInfo *store.LaunchableResponse // populated when LaunchableID is set
 	DiskSizeGB     float64                   // explicit --disk-size override in GB
+	Region         string                    // explicit --region create location
 }
 
 // parseLaunchableID extracts a launchable ID from either a raw ID (env-XXX) or
@@ -400,7 +407,7 @@ func warnLaunchableFlagConflicts(cmd *cobra.Command, t *terminal.Terminal, launc
 	}
 
 	instanceFlagsSet := cmd.Flags().Changed("type") || cmd.Flags().Changed("gpu-name") ||
-		cmd.Flags().Changed("provider") || cmd.Flags().Changed("min-vram")
+		cmd.Flags().Changed("provider") || cmd.Flags().Changed("region") || cmd.Flags().Changed("min-vram")
 	if instanceFlagsSet {
 		t.Vprintf("Warning: Overriding the launchable's recommended instance configuration. This is not the recommended path and may cause issues.\n\n")
 	}
@@ -519,6 +526,7 @@ func searchInstances(s GPUCreateStore, filters *searchFilterFlags) ([]gpusearch.
 	filtered := gpusearch.FilterInstancesWithOptions(instances, &gpusearch.FilterOptions{
 		GPUName:       filters.gpuName,
 		Provider:      filters.provider,
+		Region:        filters.region,
 		MinVRAM:       filters.minVRAM,
 		MinTotalVRAM:  minTotalVRAM,
 		MinCapability: minCapability,
@@ -1049,6 +1057,9 @@ func (c *createContext) createWorkspace(name string, spec InstanceSpec) (*entity
 
 	if c.opts.DiskSizeGB > 0 {
 		cwOptions.DiskStorage = fmt.Sprintf("%.0fGi", c.opts.DiskSizeGB)
+	}
+	if c.opts.Region != "" {
+		cwOptions.Location = c.opts.Region
 	}
 
 	workspace, err := c.store.CreateWorkspace(c.org.ID, cwOptions)

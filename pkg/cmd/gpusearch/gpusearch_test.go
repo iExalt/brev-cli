@@ -184,6 +184,41 @@ func TestFilterInstancesByGPUName(t *testing.T) {
 	assert.Len(t, filtered, 3, "Should have 3 instances matching 'A1' (A10G and A100)")
 }
 
+func TestFilterInstancesByRegion(t *testing.T) {
+	response := &InstanceTypesResponse{
+		Items: []InstanceType{
+			{
+				Type: "g5.xlarge",
+				SupportedGPUs: []GPU{
+					{Count: 1, Name: "A10G", Manufacturer: "NVIDIA", Memory: "24GiB"},
+				},
+				Provider:           "gcp",
+				Location:           "us-west1",
+				AvailableLocations: []string{"us-west1", "us-central1"},
+			},
+			{
+				Type: "g5.2xlarge",
+				SupportedGPUs: []GPU{
+					{Count: 1, Name: "A10G", Manufacturer: "NVIDIA", Memory: "24GiB"},
+				},
+				Provider:           "gcp",
+				Location:           "europe-west4",
+				SubLocation:        "europe-west4-a",
+				AvailableLocations: []string{"europe-west4-a"},
+			},
+		},
+	}
+	instances := ProcessInstances(response.Items)
+
+	filtered := FilterInstancesWithOptions(instances, &FilterOptions{Region: "us-west1"}, true)
+	assert.Len(t, filtered, 1)
+	assert.Equal(t, "g5.xlarge", filtered[0].Type)
+
+	filtered = FilterInstancesWithOptions(instances, &FilterOptions{Region: "west4-a"}, true)
+	assert.Len(t, filtered, 1)
+	assert.Equal(t, "g5.2xlarge", filtered[0].Type)
+}
+
 func TestFilterInstancesByMinVRAM(t *testing.T) {
 	response := createTestInstanceTypes()
 	instances := ProcessInstances(response.Items)

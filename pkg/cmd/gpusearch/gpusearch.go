@@ -278,28 +278,31 @@ func newCmdCPUSubcommand(t *terminal.Terminal, store GPUSearchStore) *cobra.Comm
 
 // GPUInstanceInfo holds processed GPU instance information for display
 type GPUInstanceInfo struct {
-	Type           string  `json:"type"`
-	Cloud          string  `json:"cloud"`    // Underlying cloud (e.g., hyperstack, aws, gcp)
-	Provider       string  `json:"provider"` // Provider/aggregator (e.g., shadeform, aws, gcp)
-	GPUName        string  `json:"gpu_name"`
-	GPUCount       int     `json:"gpu_count"`
-	VRAMPerGPU     float64 `json:"vram_per_gpu_gb"`
-	TotalVRAM      float64 `json:"total_vram_gb"`
-	Capability     float64 `json:"capability"`
-	VCPUs          int     `json:"vcpus"`
-	Memory         string  `json:"memory"`
-	RAMInGB        float64 `json:"ram_gb"`
-	Arch           string  `json:"arch"`
-	DiskMin        float64 `json:"disk_min_gb"`
-	DiskMax        float64 `json:"disk_max_gb"`
-	DiskPricePerMo float64 `json:"disk_price_per_gb_mo,omitempty"` // $/GB/month for flexible storage
-	BootTime       int     `json:"boot_time_seconds"`
-	Stoppable      bool    `json:"stoppable"`
-	Rebootable     bool    `json:"rebootable"`
-	FlexPorts      bool    `json:"flex_ports"`
-	TargetDisk     float64 `json:"target_disk_gb,omitempty"`
-	PricePerHour   float64 `json:"price_per_hour"`
-	Manufacturer   string  `json:"-"` // exclude from JSON output
+	Type               string   `json:"type"`
+	Cloud              string   `json:"cloud"`    // Underlying cloud (e.g., hyperstack, aws, gcp)
+	Provider           string   `json:"provider"` // Provider/aggregator (e.g., shadeform, aws, gcp)
+	Location           string   `json:"location,omitempty"`
+	SubLocation        string   `json:"sub_location,omitempty"`
+	AvailableLocations []string `json:"available_locations,omitempty"`
+	GPUName            string   `json:"gpu_name"`
+	GPUCount           int      `json:"gpu_count"`
+	VRAMPerGPU         float64  `json:"vram_per_gpu_gb"`
+	TotalVRAM          float64  `json:"total_vram_gb"`
+	Capability         float64  `json:"capability"`
+	VCPUs              int      `json:"vcpus"`
+	Memory             string   `json:"memory"`
+	RAMInGB            float64  `json:"ram_gb"`
+	Arch               string   `json:"arch"`
+	DiskMin            float64  `json:"disk_min_gb"`
+	DiskMax            float64  `json:"disk_max_gb"`
+	DiskPricePerMo     float64  `json:"disk_price_per_gb_mo,omitempty"` // $/GB/month for flexible storage
+	BootTime           int      `json:"boot_time_seconds"`
+	Stoppable          bool     `json:"stoppable"`
+	Rebootable         bool     `json:"rebootable"`
+	FlexPorts          bool     `json:"flex_ports"`
+	TargetDisk         float64  `json:"target_disk_gb,omitempty"`
+	PricePerHour       float64  `json:"price_per_hour"`
+	Manufacturer       string   `json:"-"` // exclude from JSON output
 }
 
 // IsStdoutPiped returns true if stdout is being piped (not a terminal)
@@ -761,24 +764,27 @@ func ProcessInstances(items []InstanceType) []GPUInstanceInfo {
 		if len(item.SupportedGPUs) == 0 {
 			// CPU-only instance
 			instances = append(instances, GPUInstanceInfo{
-				Type:           item.Type,
-				Cloud:          extractCloud(item.Type, item.Provider),
-				Provider:       item.Provider,
-				GPUName:        "-",
-				GPUCount:       0,
-				VCPUs:          item.VCPU,
-				Memory:         item.Memory,
-				RAMInGB:        ramInGB,
-				Arch:           arch,
-				DiskMin:        diskMin,
-				DiskMax:        diskMax,
-				DiskPricePerMo: diskPricePerMo,
-				BootTime:       bootTime,
-				Stoppable:      item.Stoppable,
-				Rebootable:     item.Rebootable,
-				FlexPorts:      item.CanModifyFirewallRules,
-				PricePerHour:   price,
-				Manufacturer:   "cpu",
+				Type:               item.Type,
+				Cloud:              extractCloud(item.Type, item.Provider),
+				Provider:           item.Provider,
+				Location:           item.Location,
+				SubLocation:        item.SubLocation,
+				AvailableLocations: item.AvailableLocations,
+				GPUName:            "-",
+				GPUCount:           0,
+				VCPUs:              item.VCPU,
+				Memory:             item.Memory,
+				RAMInGB:            ramInGB,
+				Arch:               arch,
+				DiskMin:            diskMin,
+				DiskMax:            diskMax,
+				DiskPricePerMo:     diskPricePerMo,
+				BootTime:           bootTime,
+				Stoppable:          item.Stoppable,
+				Rebootable:         item.Rebootable,
+				FlexPorts:          item.CanModifyFirewallRules,
+				PricePerHour:       price,
+				Manufacturer:       "cpu",
 			})
 			continue
 		}
@@ -794,27 +800,30 @@ func ProcessInstances(items []InstanceType) []GPUInstanceInfo {
 			capability := getGPUCapability(gpu.Name)
 
 			instances = append(instances, GPUInstanceInfo{
-				Type:           item.Type,
-				Cloud:          extractCloud(item.Type, item.Provider),
-				Provider:       item.Provider,
-				GPUName:        gpu.Name,
-				GPUCount:       gpu.Count,
-				VRAMPerGPU:     vramPerGPU,
-				TotalVRAM:      totalVRAM,
-				Capability:     capability,
-				VCPUs:          item.VCPU,
-				Memory:         item.Memory,
-				RAMInGB:        ramInGB,
-				Arch:           arch,
-				DiskMin:        diskMin,
-				DiskMax:        diskMax,
-				DiskPricePerMo: diskPricePerMo,
-				BootTime:       bootTime,
-				Stoppable:      item.Stoppable,
-				Rebootable:     item.Rebootable,
-				FlexPorts:      item.CanModifyFirewallRules,
-				PricePerHour:   price,
-				Manufacturer:   gpu.Manufacturer,
+				Type:               item.Type,
+				Cloud:              extractCloud(item.Type, item.Provider),
+				Provider:           item.Provider,
+				Location:           item.Location,
+				SubLocation:        item.SubLocation,
+				AvailableLocations: item.AvailableLocations,
+				GPUName:            gpu.Name,
+				GPUCount:           gpu.Count,
+				VRAMPerGPU:         vramPerGPU,
+				TotalVRAM:          totalVRAM,
+				Capability:         capability,
+				VCPUs:              item.VCPU,
+				Memory:             item.Memory,
+				RAMInGB:            ramInGB,
+				Arch:               arch,
+				DiskMin:            diskMin,
+				DiskMax:            diskMax,
+				DiskPricePerMo:     diskPricePerMo,
+				BootTime:           bootTime,
+				Stoppable:          item.Stoppable,
+				Rebootable:         item.Rebootable,
+				FlexPorts:          item.CanModifyFirewallRules,
+				PricePerHour:       price,
+				Manufacturer:       gpu.Manufacturer,
 			})
 		}
 	}
@@ -826,6 +835,7 @@ func ProcessInstances(items []InstanceType) []GPUInstanceInfo {
 type FilterOptions struct {
 	GPUName       string
 	Provider      string
+	Region        string
 	Arch          string
 	MinVRAM       float64
 	MinTotalVRAM  float64
@@ -854,11 +864,27 @@ func (f *FilterOptions) matchesStringFilters(inst GPUInstanceInfo) bool {
 	if f.Provider != "" && !strings.Contains(strings.ToLower(inst.Provider), strings.ToLower(f.Provider)) {
 		return false
 	}
+	// Filter by region/location (case-insensitive partial match)
+	if f.Region != "" && !matchesRegionFilter(inst, f.Region) {
+		return false
+	}
 	// Filter by architecture (case-insensitive partial match)
 	if f.Arch != "" && !strings.Contains(strings.ToLower(inst.Arch), strings.ToLower(f.Arch)) {
 		return false
 	}
 	return true
+}
+
+func matchesRegionFilter(inst GPUInstanceInfo, region string) bool {
+	region = strings.ToLower(region)
+	candidates := []string{inst.Location, inst.SubLocation}
+	candidates = append(candidates, inst.AvailableLocations...)
+	for _, candidate := range candidates {
+		if strings.Contains(strings.ToLower(candidate), region) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesNumericFilters checks VRAM, capability, disk, vCPU, and boot time filters
