@@ -141,6 +141,9 @@ Features column shows instance capabilities:
   # Filter by GPU name (case-insensitive, partial match)
   brev search gpu --gpu-name A100
 
+  # Filter by region
+  brev search gpu --region us-east-2
+
   # Filter by minimum VRAM per GPU (in GB)
   brev search gpu --min-vram 24
 
@@ -160,6 +163,9 @@ Features column shows instance capabilities:
   # Filter by provider
   brev search cpu --provider aws
 
+  # Filter by region
+  brev search cpu --provider aws --region us-east-2
+
   # Filter by minimum RAM
   brev search cpu --min-ram 64
 
@@ -177,6 +183,7 @@ Features column shows instance capabilities:
 // sharedFlags holds flags shared between gpu and cpu subcommands
 type sharedFlags struct {
 	provider    string
+	region      string
 	arch        string
 	minVCPU     int
 	minRAM      float64
@@ -194,6 +201,7 @@ type sharedFlags struct {
 // addSharedFlags adds common flags to a command
 func addSharedFlags(cmd *cobra.Command, f *sharedFlags) {
 	cmd.Flags().StringVarP(&f.provider, "provider", "p", "", "Filter by provider/cloud (case-insensitive, partial match)")
+	cmd.Flags().StringVar(&f.region, "region", "", "Filter by region or zone across available locations (case-insensitive, partial match)")
 	cmd.Flags().StringVar(&f.arch, "arch", "", "Filter by architecture (e.g., x86_64, arm64)")
 	cmd.Flags().IntVar(&f.minVCPU, "min-vcpu", 0, "Minimum number of vCPUs")
 	cmd.Flags().Float64Var(&f.minRAM, "min-ram", 0, "Minimum RAM in GB")
@@ -247,7 +255,7 @@ func NewCmdGPUSearch(t *terminal.Terminal, store GPUSearchStore) *cobra.Command 
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default behavior: GPU search
-			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
+			return RunGPUSearch(t, store, gpuName, shared.provider, shared.region, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
 		},
 	}
 
@@ -281,7 +289,7 @@ func newCmdGPUSubcommand(t *terminal.Terminal, store GPUSearchStore) *cobra.Comm
 		Short:                 "Search GPU instance types",
 		Example:               gpuExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunGPUSearch(t, store, gpuName, shared.provider, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
+			return RunGPUSearch(t, store, gpuName, shared.provider, shared.region, shared.arch, minVRAM, minTotalVRAM, minCapability, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput, wide)
 		},
 	}
 
@@ -305,7 +313,7 @@ func newCmdCPUSubcommand(t *terminal.Terminal, store GPUSearchStore) *cobra.Comm
 		Short:                 "Search CPU-only instance types",
 		Example:               cpuExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunCPUSearch(t, store, shared.provider, shared.arch, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput)
+			return RunCPUSearch(t, store, shared.provider, shared.region, shared.arch, shared.minRAM, shared.minDisk, shared.maxPrice, shared.minVCPU, shared.maxBootTime, shared.stoppable, shared.rebootable, shared.flexPorts, shared.sortBy, shared.descending, shared.jsonOutput)
 		},
 	}
 
@@ -350,7 +358,7 @@ func IsStdoutPiped() bool {
 }
 
 // RunGPUSearch executes the GPU search with filters and sorting
-func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider, arch string, minVRAM, minTotalVRAM, minCapability, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput, wide bool) error {
+func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider, region, arch string, minVRAM, minTotalVRAM, minCapability, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput, wide bool) error {
 	if err := validateSortOption(sortBy); err != nil {
 		return err
 	}
@@ -371,6 +379,7 @@ func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider,
 	filtered := FilterInstancesWithOptions(instances, &FilterOptions{
 		GPUName:       gpuName,
 		Provider:      provider,
+		Region:        region,
 		Arch:          arch,
 		MinVRAM:       minVRAM,
 		MinTotalVRAM:  minTotalVRAM,
@@ -395,7 +404,7 @@ func RunGPUSearch(t *terminal.Terminal, store GPUSearchStore, gpuName, provider,
 }
 
 // RunCPUSearch executes the CPU search with filters and sorting
-func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, arch string, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput bool) error {
+func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, region, arch string, minRAM, minDisk, maxPrice float64, minVCPU, maxBootTime int, stoppable, rebootable, flexPorts bool, sortBy string, descending, jsonOutput bool) error {
 	if err := validateSortOption(sortBy); err != nil {
 		return err
 	}
@@ -415,6 +424,7 @@ func RunCPUSearch(t *terminal.Terminal, store GPUSearchStore, provider, arch str
 
 	filtered := FilterCPUInstancesWithOptions(instances, &FilterOptions{
 		Provider:    provider,
+		Region:      region,
 		Arch:        arch,
 		MinRAM:      minRAM,
 		MinDisk:     minDisk,

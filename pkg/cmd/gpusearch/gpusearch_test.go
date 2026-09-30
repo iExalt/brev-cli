@@ -1,10 +1,14 @@
 package gpusearch
 
 import (
+	"encoding/json"
+	"io"
+	"os"
 	"testing"
 
 	"github.com/brevdev/brev-cli/pkg/terminal"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // MockGPUSearchStore is a mock implementation of GPUSearchStore for testing
@@ -750,5 +754,85 @@ func TestSearchCommandRejectsUnknownPositionalTokens(t *testing.T) {
 			assert.ErrorContains(t, err, "Available subcommands: cpu, gpu")
 			assert.Empty(t, store.calls, "unknown subcommand should not call the store")
 		})
+	}
+}
+
+func TestSearchRegionFlag(t *testing.T) {
+	response := &InstanceTypesResponse{}
+	for _, cpu := range []bool{false, true} {
+		prefix := "gpu-"
+		if cpu {
+			prefix = "cpu-"
+		}
+		for _, item := range []InstanceType{
+			{Type: "location", Provider: "aws", Location: "us-east-2"},
+			{Type: "zone", Provider: "gcp", SubLocation: "us-central1-a"},
+			{Type: "available", Provider: "aws", Location: "us-west-2", AvailableLocations: []string{"us-west-2", "us-east-2"}},
+			{Type: "unknown", Provider: "aws"},
+		} {
+			item.Type = prefix + item.Type
+			if !cpu {
+				item.SupportedGPUs = []GPU{{Count: 1, Name: "A100", Manufacturer: "NVIDIA", Memory: "40GiB"}}
+			}
+			response.Items = append(response.Items, item)
+		}
+	}
+
+	for _, mode := range []string{"", "gpu", "cpu"} {
+		for _, tc := range []struct {
+			name  string
+			flags []string
+			want  []string
+		}{
+			{"location and available locations", []string{"--region", "US-EAST-2"}, []string{"location", "available"}},
+			{"zone partial match", []string{"--region", "central1"}, []string{"zone"}},
+			{"combined provider filter", []string{"--region", "us-", "--provider", "gcp"}, []string{"zone"}},
+			{"no matches", []string{"--region", "eu-north-1"}, nil},
+			{"no filter", nil, []string{"location", "zone", "available", "unknown"}},
+		} {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				apiResponse := &InstanceTypesResponse{}
+				for _, item := range response.Items {
+					// The public API excludes CPU types unless includeCPU is set.
+					if mode == "cpu" || len(item.SupportedGPUs) > 0 {
+						apiResponse.Items = append(apiResponse.Items, item)
+					}
+				}
+				cmd := NewCmdGPUSearch(terminal.New(), &MockGPUSearchStore{Response: apiResponse})
+				args := []string{}
+				if mode != "" {
+					args = append(args, mode)
+				}
+				args = append(args, tc.flags...)
+				cmd.SetArgs(append(args, "--json"))
+
+				reader, writer, err := os.Pipe()
+				require.NoError(t, err)
+				defer reader.Close()
+				originalStdout := os.Stdout
+				os.Stdout = writer
+				defer func() { os.Stdout = originalStdout }()
+				execErr := cmd.Execute()
+				os.Stdout = originalStdout
+				require.NoError(t, writer.Close())
+				require.NoError(t, execErr)
+				output, err := io.ReadAll(reader)
+				require.NoError(t, err)
+				var results []GPUInstanceInfo
+				require.NoError(t, json.Unmarshal(output, &results))
+				prefix := "gpu-"
+				if mode == "cpu" {
+					prefix = "cpu-"
+				}
+				var want, got []string
+				for _, name := range tc.want {
+					want = append(want, prefix+name)
+				}
+				for _, result := range results {
+					got = append(got, result.Type)
+				}
+				assert.ElementsMatch(t, want, got)
+			})
+		}
 	}
 }

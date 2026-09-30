@@ -34,6 +34,18 @@ brev search --provider gcp
 brev search --provider azure
 ```
 
+### Region (`--region`)
+Filter GPU or CPU instances by region or zone. Case-insensitive, partial match
+against `location`, `sub_location`, and every entry in `available_locations`.
+Filtering happens locally using the locations returned by the API; instances
+without location metadata are excluded when this filter is set.
+
+```bash
+brev search --region us-east-2
+brev search gpu --region europe-west4
+brev search cpu --provider aws --region us-east-2
+```
+
 ### VRAM (`--min-vram`, `-v`)
 Minimum VRAM per GPU in GB.
 
