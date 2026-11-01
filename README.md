@@ -82,6 +82,21 @@ brev ls
 
 https://docs.nvidia.com/brev/latest/
 
+### Cloud Firewall ports
+
+List, open, and remove an instance's Cloud Firewall ports:
+
+```sh
+brev firewall ls awesome-gpu-name
+brev firewall add awesome-gpu-name 4242 --allow 203.0.113.7/32
+brev firewall rm awesome-gpu-name 4242
+```
+
+Use `--all` instead of `--allow` to permit all IPs. Removal revokes every rule on
+the selected port. Changes apply asynchronously. See
+[Cloud Firewall command help](pkg/cmd/firewall/doc.md) for details and how this
+differs from `brev ports` and `brev port-forward`.
+
 ---
 
 ## AI Agent Integration

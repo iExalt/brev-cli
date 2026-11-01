@@ -41,6 +41,21 @@ func TestNewDefaultBrevCommandRegistersGlobalOrgFlag(t *testing.T) {
 	assert.True(t, registered)
 }
 
+func TestFirewallCommandsAppearInHelp(t *testing.T) {
+	root := NewDefaultBrevCommand()
+	group, _, err := root.Find([]string{"firewall"})
+	require.NoError(t, err)
+	require.Equal(t, "firewall", group.Name())
+	usage := group.UsageString()
+	for _, description := range []string{
+		"List live Cloud Firewall ingress rules",
+		"Open a Cloud Firewall port",
+		"Remove ALL Cloud Firewall rules",
+	} {
+		require.Contains(t, usage, description)
+	}
+}
+
 func TestAllowsOrgOverrideWithExternalAuth(t *testing.T) {
 	for _, commandName := range []string{"register", "grant-ssh", "revoke-ssh"} {
 		assert.True(t, allowsOrgOverrideWithExternalAuth(&cobra.Command{Use: commandName, Annotations: map[string]string{externalNodeAuthAnnotation: ""}}))

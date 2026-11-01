@@ -23,6 +23,7 @@ import (
 	"github.com/brevdev/brev-cli/pkg/cmd/envvars"
 	"github.com/brevdev/brev-cli/pkg/cmd/exec"
 	"github.com/brevdev/brev-cli/pkg/cmd/feedback"
+	"github.com/brevdev/brev-cli/pkg/cmd/firewall"
 	"github.com/brevdev/brev-cli/pkg/cmd/fu"
 	"github.com/brevdev/brev-cli/pkg/cmd/gpucreate"
 	"github.com/brevdev/brev-cli/pkg/cmd/gpusearch"
@@ -330,6 +331,7 @@ func createCmdTree(cmd *cobra.Command, t *terminal.Terminal, loginCmdStore *stor
 	cmd.AddCommand(redeem.NewCmdRedeem(t, loginCmdStore))
 	cmd.AddCommand(portforward.NewCmdPortForwardSSH(loginCmdStore, t))
 	cmd.AddCommand(ports.NewCmdPorts(loginCmdStore))
+	cmd.AddCommand(firewall.NewCmdFirewall(loginCmdStore))
 	cmd.AddCommand(login.NewCmdLogin(t, noLoginCmdStore, loginAuth))
 	cmd.AddCommand(logout.NewCmdLogout(loginAuth, noLoginCmdStore))
 	cmd.AddCommand(tasks.NewCmdTasks(t, noLoginCmdStore))
